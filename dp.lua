@@ -1,11 +1,14 @@
 -- ============================================================
--- AUTO SCAN + FEED MUTATION MACHINE (v4.3)
+-- AUTO SCAN + FEED MUTATION MACHINE (v4.5)
 -- + Minimum Mutation Filter (default: Diamond)
 -- + Skip Diamond & Gold (existing mutation)
 -- + Pond Booster SupremeFoodTray (ON/OFF + Interval Input)
 -- + Auto Deteksi Waktu Mesin
 -- + Auto Stop Jika Tidak Ada Pet Eligible
 -- + Discord Webhook (HANYA hasil mutasi)
+-- + ⭐ Webhook Progress (total pet tersisa)
+-- + ⭐ Webhook Completion (semua pet selesai)
+-- + ⭐ Webhook UI Redesign (rapi & full width)
 -- + Test Webhook Button
 -- + HTTP Multi-Fallback (request / syn.request / PostAsync)
 -- + Webhook ambil mutation dari pet data setelah collect
@@ -50,7 +53,11 @@ local CONFIG = {
     -- ⭐ WEBHOOK (hanya hasil mutasi)
     WEBHOOK_ENABLED = false,
     WEBHOOK_URL = "",
-    WEBHOOK_USERNAME = "Auto Mutation v4.3",
+    WEBHOOK_USERNAME = "Auto Mutation v4.5",
+    
+    -- ⭐ WEBHOOK SUMMARY (progress & completion)
+    WEBHOOK_SEND_PROGRESS = true,   -- kirim ringkasan tiap cycle
+    WEBHOOK_SEND_COMPLETE = true,   -- kirim notif saat semua pet selesai
 }
 
 --// ============================================================
@@ -304,7 +311,7 @@ local function sendMutationWebhook(petName, petAge, petId, mutationResult)
                 { name = "Age", value = tostring(petAge), inline = true },
                 { name = "ID",  value = shortUUID(petId), inline = false },
             },
-            footer = { text = "Auto Mutation v4.3 • " .. os.date("%H:%M:%S") },
+            footer = { text = "Auto Mutation v4.5 • " .. os.date("%H:%M:%S") },
         }},
     }
 
@@ -318,6 +325,121 @@ local function sendMutationWebhook(petName, petAge, petId, mutationResult)
             print("[Webhook] ✅ Terkirim:", err)
         end
     end)
+end
+
+--// ============================================================
+-- ⭐ WEBHOOK: PROGRESS & COMPLETION
+--// ============================================================
+local function sendProgressWebhook(totalEligible, totalAll, fedCount, skippedCount)
+    if not CONFIG.WEBHOOK_ENABLED then return end
+    if not CONFIG.WEBHOOK_SEND_PROGRESS then return end
+    if not CONFIG.WEBHOOK_URL or CONFIG.WEBHOOK_URL == "" then return end
+
+    local payload = {
+        username = CONFIG.WEBHOOK_USERNAME,
+        embeds = {{
+            title = "📊 Mutation Progress Update",
+            color = 0x3498DB,
+            fields = {
+                { name = "🐾 Eligible (siap mutasi)", value = tostring(totalEligible), inline = true },
+                { name = "📦 Total Pet di Inventory", value = tostring(totalAll),      inline = true },
+                { name = "✅ Fed Cycle Ini",          value = tostring(fedCount),      inline = true },
+                { name = "⏭️ Skipped (Diamond/Gold)", value = tostring(skippedCount),  inline = true },
+                { name = "🎯 Target Age",             value = tostring(CONFIG.TARGET_AGE), inline = true },
+                { name = "💎 Min Mutation",           value = tostring(CONFIG.MIN_MUTATION), inline = true },
+            },
+            footer = { text = "Auto Mutation v4.5 • " .. os.date("%H:%M:%S") },
+        }},
+    }
+
+    local body = HttpService:JSONEncode(payload)
+    task.spawn(function()
+        local ok, err = httpPost(CONFIG.WEBHOOK_URL, body)
+        if not ok then
+            warn("[Webhook Progress] ❌ Gagal:", tostring(err))
+        end
+    end)
+end
+
+local function sendCompletionWebhook(totalAll, totalProcessed, totalSkipped)
+    if not CONFIG.WEBHOOK_ENABLED then return end
+    if not CONFIG.WEBHOOK_SEND_COMPLETE then return end
+    if not CONFIG.WEBHOOK_URL or CONFIG.WEBHOOK_URL == "" then return end
+
+    local payload = {
+        username = CONFIG.WEBHOOK_USERNAME,
+        content = "✅ **SEMUA PET TELAH SELESAI DI MUTASIKAN!**",
+        embeds = {{
+            title = "🎉 Auto Mutation Selesai",
+            description = "Semua pet yang eligible sudah diproses.\nTidak ada lagi pet yang memenuhi syarat mutasi.",
+            color = 0x2ECC71,
+            fields = {
+                { name = "📦 Total Pet",      value = tostring(totalAll),       inline = true },
+                { name = "✅ Total Diproses", value = tostring(totalProcessed), inline = true },
+                { name = "⏭️ Total Skipped",  value = tostring(totalSkipped),   inline = true },
+                { name = "💎 Min Mutation",   value = tostring(CONFIG.MIN_MUTATION), inline = true },
+                { name = "🎯 Target Age",     value = tostring(CONFIG.TARGET_AGE),   inline = true },
+                { name = "👤 Player",         value = LocalPlayer.Name,        inline = true },
+            },
+            footer = { text = "Auto Mutation v4.5 • " .. os.date("%Y-%m-%d %H:%M:%S") },
+        }},
+    }
+
+    local body = HttpService:JSONEncode(payload)
+    task.spawn(function()
+        local ok, err = httpPost(CONFIG.WEBHOOK_URL, body)
+        if not ok then
+            warn("[Webhook Complete] ❌ Gagal:", tostring(err))
+        else
+            print("[Webhook Complete] ✅ Notifikasi selesai terkirim")
+        end
+    end)
+end
+
+-- ⭐ Hitung total pet & skipped di inventory (buat summary)
+local function getInventoryStats()
+    if not inventoryStateModule then return 0, 0, 0 end
+
+    local ok, stacked = pcall(function() return inventoryStateModule.inventoryStackedData() end)
+    if not ok or not stacked then return 0, 0, 0 end
+
+    local totalAll = 0
+    local totalEligible = 0
+    local totalSkipped = 0
+
+    local data = getPlayerData()
+    local equippedSet = {}
+    if data and data.equippedPets then
+        for _, id in ipairs(data.equippedPets) do
+            equippedSet[id] = true
+        end
+    end
+
+    local seen = {}
+    for _, item in pairs(stacked) do
+        local tt = tostring(item.toolType or ""):lower()
+        if tt:find("pet") and item.items then
+            for _, it in ipairs(item.items) do
+                if it.id and not seen[it.id] and it.data then
+                    seen[it.id] = true
+                    totalAll = totalAll + 1
+
+                    local age = getPetAge(it.data)
+                    local isMaxAge = age >= CONFIG.TARGET_AGE
+                    local isSkip = isBelowMinMutation(it.data)
+                    local isEquipped = equippedSet[it.id] == true
+
+                    if isMaxAge and isSkip then
+                        totalSkipped = totalSkipped + 1
+                    elseif isMaxAge and not isSkip and not isEquipped then
+                        totalEligible = totalEligible + 1
+                    end
+                end
+            end
+        end
+    end
+
+    return totalAll, totalEligible, totalSkipped
 end
 
 --// ============================================================
@@ -492,7 +614,6 @@ local function feedPetToMachine(petEntry)
     
     local cok, cresult = safeInvoke(Remotes.collectMut)
 
-    -- Debug raw result
     if cok then
         print("  🔎 Raw collect result type:", typeof(cresult))
         if type(cresult) == "table" then
@@ -506,7 +627,6 @@ local function feedPetToMachine(petEntry)
         local mutationResult = parseMutationResult(cresult)
         print("  🎉 Collect OK (raw):", tostring(mutationResult))
 
-        -- ⭐ Ambil mutation ASLI dari pet data setelah collect
         task.wait(1)
         local freshData, freshName = getPetDataById(petId)
         local realMutation = nil
@@ -519,7 +639,6 @@ local function feedPetToMachine(petEntry)
             print("  ⚠️ Pet data tidak ditemukan di inventory setelah collect")
         end
 
-        -- Fallback ke raw result kalau freshData tidak ada
         if not realMutation or realMutation == "None" then
             if mutationResult and mutationResult ~= "true" then
                 realMutation = mutationResult
@@ -529,7 +648,6 @@ local function feedPetToMachine(petEntry)
         realMutation = realMutation or "None"
         print("  ✅ Mutation final:", realMutation)
 
-        -- ⭐ Kirim ke webhook HANYA hasil mutasi
         sendMutationWebhook(petName, petEntry.age, petId, realMutation)
 
         if realMutation == "Diamond" then
@@ -561,7 +679,6 @@ local function feedPetToMachine(petEntry)
                 local mutationResult = parseMutationResult(rresult)
                 print("  🎉 Collect OK (retry", i, "raw):", tostring(mutationResult))
 
-                -- ⭐ Ambil mutation ASLI dari pet data setelah collect
                 task.wait(1)
                 local freshData, freshName = getPetDataById(petId)
                 local realMutation = nil
@@ -651,30 +768,40 @@ end
 --// ============================================================
 local isRunning = false
 local emptyCount = 0
+local totalProcessedSession = 0
 
 local function autoFeedLoop()
     if isRunning then return end
     isRunning = true
     emptyCount = 0
+    totalProcessedSession = 0
     
     while CONFIG.AUTO_FEED do
         print(string.rep("=", 50))
         print("🔍 Scan pet eligible...")
         
         local eligible = findEligiblePets()
+        local totalAll, totalEligible, totalSkipped = getInventoryStats()
         
         if #eligible == 0 then
             emptyCount = emptyCount + 1
             print(string.format("  ⏸ Tidak ada pet eligible (scan kosong #%d/%d)", 
                 emptyCount, CONFIG.EMPTY_COUNT_THRESHOLD))
             
+            -- ⭐ Kirim progress webhook
+            sendProgressWebhook(totalEligible, totalAll, 0, totalSkipped)
+            
             if CONFIG.AUTO_STOP_IF_EMPTY and emptyCount >= CONFIG.EMPTY_COUNT_THRESHOLD then
                 print("  🛑 Semua pet sudah diproses / tidak ada yang eligible!")
                 print("  🛑 AUTO STOP...")
                 
+                -- ⭐ Kirim completion webhook
+                sendCompletionWebhook(totalAll, totalProcessedSession, totalSkipped)
+                
                 if log then
                     log("🛑 AUTO STOP: Tidak ada pet eligible")
                     log(string.format("   (scan kosong %dx)", emptyCount))
+                    log(string.format("   Total diproses: %d", totalProcessedSession))
                 end
                 
                 pcall(function()
@@ -702,12 +829,16 @@ local function autoFeedLoop()
                 local success = feedPetToMachine(petEntry)
                 if success then
                     fed = fed + 1
+                    totalProcessedSession = totalProcessedSession + 1
                     print(string.format("  ✅ Fed %d/%d", fed, CONFIG.MAX_FEED_PER_CYCLE))
                 else
                     print("  ❌ Feed gagal, skip pet ini")
                 end
                 task.wait(1)
             end
+            
+            -- ⭐ Kirim progress webhook setelah cycle selesai
+            sendProgressWebhook(totalEligible, totalAll, fed, totalSkipped)
             
             task.wait(CONFIG.SCAN_INTERVAL)
         end
@@ -725,8 +856,8 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 380, 0, 530)
-Frame.Position = UDim2.new(0, 20, 0.5, -265)
+Frame.Size = UDim2.new(0, 380, 0, 570)
+Frame.Position = UDim2.new(0, 20, 0.5, -285)
 Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 Frame.BorderSizePixel = 0
 Frame.Active = true
@@ -743,7 +874,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 34)
 Title.BackgroundColor3 = Color3.fromRGB(55, 40, 85)
 Title.BorderSizePixel = 0
-Title.Text = "🧬 AUTO MUTATION (v4.3 + Min Diamond)"
+Title.Text = "🧬 AUTO MUTATION (v4.5)"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -970,9 +1101,9 @@ IntervalUnit.TextSize = 10
 IntervalUnit.Font = Enum.Font.Gotham
 IntervalUnit.Parent = BoosterFrame
 
--- ⭐ WEBHOOK SECTION
+-- ⭐ WEBHOOK SECTION (REDESIGN)
 local WebhookFrame = Instance.new("Frame")
-WebhookFrame.Size = UDim2.new(1, -20, 0, 60)
+WebhookFrame.Size = UDim2.new(1, -20, 0, 96)
 WebhookFrame.Position = UDim2.new(0, 10, 0, 372)
 WebhookFrame.BackgroundColor3 = Color3.fromRGB(30, 25, 45)
 WebhookFrame.BorderSizePixel = 0
@@ -987,16 +1118,17 @@ local WebhookTitle = Instance.new("TextLabel")
 WebhookTitle.Size = UDim2.new(1, -12, 0, 16)
 WebhookTitle.Position = UDim2.new(0, 6, 0, 4)
 WebhookTitle.BackgroundTransparency = 1
-WebhookTitle.Text = "🔔 DISCORD WEBHOOK — klik TEST untuk cek"
+WebhookTitle.Text = "🔔 DISCORD WEBHOOK"
 WebhookTitle.TextColor3 = Color3.fromRGB(200, 170, 255)
 WebhookTitle.TextSize = 10
 WebhookTitle.Font = Enum.Font.GothamBold
 WebhookTitle.TextXAlignment = Enum.TextXAlignment.Left
 WebhookTitle.Parent = WebhookFrame
 
+-- BARIS 1: Toggle ON/OFF (kiri) + Status (tengah) + Tombol TEST (kanan)
 local WebhookToggle = Instance.new("TextButton")
-WebhookToggle.Size = UDim2.new(0.22, -6, 0, 26)
-WebhookToggle.Position = UDim2.new(0, 6, 0, 24)
+WebhookToggle.Size = UDim2.new(0.28, -4, 0, 24)
+WebhookToggle.Position = UDim2.new(0, 6, 0, 22)
 WebhookToggle.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
 WebhookToggle.BorderSizePixel = 0
 WebhookToggle.Text = "OFF"
@@ -1006,31 +1138,62 @@ WebhookToggle.Font = Enum.Font.GothamBold
 WebhookToggle.Parent = WebhookFrame
 Instance.new("UICorner", WebhookToggle).CornerRadius = UDim.new(0, 6)
 
-local WebhookBox = Instance.new("TextBox")
-WebhookBox.Size = UDim2.new(0.53, -9, 0, 26)
-WebhookBox.Position = UDim2.new(0.22, 3, 0, 24)
-WebhookBox.BackgroundColor3 = Color3.fromRGB(40, 35, 55)
-WebhookBox.BorderSizePixel = 0
-WebhookBox.Text = CONFIG.WEBHOOK_URL
-WebhookBox.PlaceholderText = "https://discord.com/api/webhooks/..."
-WebhookBox.TextColor3 = Color3.fromRGB(220, 210, 255)
-WebhookBox.TextSize = 10
-WebhookBox.Font = Enum.Font.Code
-WebhookBox.ClearTextOnFocus = false
-WebhookBox.Parent = WebhookFrame
-Instance.new("UICorner", WebhookBox).CornerRadius = UDim.new(0, 6)
-
 local WebhookTest = Instance.new("TextButton")
-WebhookTest.Size = UDim2.new(0.25, -6, 0, 26)
-WebhookTest.Position = UDim2.new(0.75, 3, 0, 24)
+WebhookTest.Size = UDim2.new(0.28, -4, 0, 24)
+WebhookTest.Position = UDim2.new(0.72, 0, 0, 22)
 WebhookTest.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
 WebhookTest.BorderSizePixel = 0
-WebhookTest.Text = "TEST"
+WebhookTest.Text = "🔔 TEST"
 WebhookTest.TextColor3 = Color3.fromRGB(255, 255, 255)
 WebhookTest.TextSize = 11
 WebhookTest.Font = Enum.Font.GothamBold
 WebhookTest.Parent = WebhookFrame
 Instance.new("UICorner", WebhookTest).CornerRadius = UDim.new(0, 6)
+
+-- Status kecil di tengah baris 1
+local WebhookStatus = Instance.new("TextLabel")
+WebhookStatus.Size = UDim2.new(0.44, 0, 0, 24)
+WebhookStatus.Position = UDim2.new(0.28, 0, 0, 22)
+WebhookStatus.BackgroundTransparency = 1
+WebhookStatus.Text = "Mutation • Progress • Complete"
+WebhookStatus.TextColor3 = Color3.fromRGB(150, 150, 180)
+WebhookStatus.TextSize = 9
+WebhookStatus.Font = Enum.Font.Gotham
+WebhookStatus.Parent = WebhookFrame
+
+-- BARIS 2: URL TextBox full width
+local WebhookBox = Instance.new("TextBox")
+WebhookBox.Size = UDim2.new(1, -12, 0, 26)
+WebhookBox.Position = UDim2.new(0, 6, 0, 52)
+WebhookBox.BackgroundColor3 = Color3.fromRGB(40, 35, 55)
+WebhookBox.BorderSizePixel = 0
+WebhookBox.Text = CONFIG.WEBHOOK_URL
+WebhookBox.PlaceholderText = "https://discord.com/api/webhooks/..."
+WebhookBox.TextColor3 = Color3.fromRGB(220, 210, 255)
+WebhookBox.PlaceholderColor3 = Color3.fromRGB(120, 110, 150)
+WebhookBox.TextSize = 11
+WebhookBox.Font = Enum.Font.Code
+WebhookBox.TextXAlignment = Enum.TextXAlignment.Left
+WebhookBox.ClearTextOnFocus = false
+WebhookBox.TextTruncate = Enum.TextTruncate.AtEnd
+WebhookBox.Parent = WebhookFrame
+Instance.new("UICorner", WebhookBox).CornerRadius = UDim.new(0, 6)
+
+local WebhookBoxPadding = Instance.new("UIPadding", WebhookBox)
+WebhookBoxPadding.PaddingLeft = UDim.new(0, 8)
+WebhookBoxPadding.PaddingRight = UDim.new(0, 8)
+
+-- Label kecil di bawah box
+local WebhookHint = Instance.new("TextLabel")
+WebhookHint.Size = UDim2.new(1, -12, 0, 14)
+WebhookHint.Position = UDim2.new(0, 6, 0, 80)
+WebhookHint.BackgroundTransparency = 1
+WebhookHint.Text = "Klik TEST untuk cek koneksi • Enter untuk simpan URL"
+WebhookHint.TextColor3 = Color3.fromRGB(130, 130, 160)
+WebhookHint.TextSize = 9
+WebhookHint.Font = Enum.Font.Gotham
+WebhookHint.TextXAlignment = Enum.TextXAlignment.Left
+WebhookHint.Parent = WebhookFrame
 
 -- TOGGLE BUTTON (Auto Mutation)
 local ToggleBtn = Instance.new("TextButton")
@@ -1080,6 +1243,7 @@ ToggleBtn.MouseButton1Click:Connect(function()
     
     if CONFIG.AUTO_FEED then
         emptyCount = 0
+        totalProcessedSession = 0
         ToggleBtn.Text = "⏹ STOP"
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         StatusLabel.Text = "Status: RUNNING | Booster: " ..
@@ -1141,7 +1305,7 @@ WebhookToggle.MouseButton1Click:Connect(function()
         WebhookToggle.Text = "ON"
         WebhookToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         WebhookStroke.Color = Color3.fromRGB(180, 140, 255)
-        log("🔔 Webhook ON (hasil mutasi only)")
+        log("🔔 Webhook ON (mutation + progress + complete)")
     else
         WebhookToggle.Text = "OFF"
         WebhookToggle.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
@@ -1183,14 +1347,14 @@ WebhookTest.MouseButton1Click:Connect(function()
         username = CONFIG.WEBHOOK_USERNAME,
         embeds = {{
             title = "🔔 TEST WEBHOOK BERHASIL",
-            description = "Kalau kamu lihat pesan ini, webhook sudah **terhubung dengan benar** ✅",
+            description = "Kalau kamu lihat pesan ini, webhook sudah **terhubung dengan benar** ✅\n\nFitur webhook:\n• 🧬 Hasil mutasi per pet\n• 📊 Progress tiap cycle\n• 🎉 Notifikasi selesai",
             color = 0x8A50C8,
             fields = {
                 { name = "Player",  value = LocalPlayer.Name,             inline = true },
                 { name = "User ID", value = tostring(LocalPlayer.UserId), inline = true },
                 { name = "Time",    value = os.date("%Y-%m-%d %H:%M:%S"), inline = false },
             },
-            footer = { text = "Auto Mutation v4.3 • Test" },
+            footer = { text = "Auto Mutation v4.5 • Test" },
         }},
     }
 
@@ -1212,7 +1376,7 @@ WebhookTest.MouseButton1Click:Connect(function()
 
         task.wait(3)
         if WebhookTest and WebhookTest.Parent then
-            WebhookTest.Text = "TEST"
+            WebhookTest.Text = "🔔 TEST"
             WebhookTest.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
         end
     end)
@@ -1261,11 +1425,12 @@ end)
 task.spawn(function()
     while ScreenGui.Parent do
         local eligible = findEligiblePets()
+        local totalAll, totalEligible, totalSkipped = getInventoryStats()
         StatusLabel.Text = string.format(
-            "Status: %s | Booster: %s\nEligible: %d pet",
+            "Status: %s | Booster: %s\nEligible: %d | Total: %d | Skip: %d",
             CONFIG.AUTO_FEED and "RUNNING" or "OFF",
             CONFIG.BOOSTER_ENABLED and "ON" or "OFF",
-            #eligible
+            totalEligible, totalAll, totalSkipped
         )
         task.wait(3)
     end
@@ -1280,9 +1445,9 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- PRINT
-log("✅ GUI loaded (v4.3)")
+log("✅ GUI loaded (v4.5)")
 log("🎯 Min Mutation: " .. CONFIG.MIN_MUTATION)
 log("🛑 Skip: " .. table.concat(CONFIG.SKIP_MUTATIONS, ", "))
-log("🔔 Webhook: hasil mutasi only + tombol TEST")
+log("🔔 Webhook: mutation + progress + complete")
 log("🌐 HTTP: request/http_request/PostAsync fallback")
-print("[AutoMut] ✅ Loaded v4.3! RightShift toggle GUI.")
+print("[AutoMut] ✅ Loaded v4.5! RightShift toggle GUI.")
