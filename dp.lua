@@ -1,13 +1,6 @@
 -- ============================================================
--- AUTO SCAN + FEED MUTATION MACHINE (v4.6.2 LITE - NO BOOSTER)
--- + Minimum Mutation Filter (default: Diamond)
--- + Skip Diamond & Gold (existing mutation)
--- + Auto Deteksi Waktu Mesin
--- + Auto Stop Jika Tidak Ada Pet Eligible
--- + Discord Webhook (mutasi + berat + completion summary)
--- + HTTP Multi-Fallback
--- + GUI Compact + Tombol Minimize
--- + FIX: Webhook TextBox di tengah (1 baris)
+-- AUTO MUTATION v4.9 CLEAN
+-- Auto scan + feed mutation + webhook (mutasi + completion)
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -21,40 +14,40 @@ local LocalPlayer = Players.LocalPlayer
 --// ============================================================
 local CONFIG = {
     AUTO_FEED = false,
-    SCAN_INTERVAL = 2,
-    DRY_RUN = false,
+    SCAN_INTERVAL = 1,
     TARGET_AGE = 50,
-    
+
     SKIP_MUTATIONS = {"Diamond"},
     MIN_MUTATION = "Diamond",
-    
+
     MUTATION_TIERS = {
         "None", "Bronze", "Silver", "Gold", "Diamond", "Rainbow", "Celestial",
     },
-    
-    DELAY_EQUIP = 0.8,
+
+    DELAY_EQUIP = 0.4,
     DELAY_INSERT = 1,
-    DELAY_COLLECT = 3,
+    DELAY_COLLECT = 2,
     MAX_FEED_PER_CYCLE = 1,
     POLL_INTERVAL = 2,
     MUTATION_TIMEOUT = 600,
-    
+
     AUTO_STOP_IF_EMPTY = true,
-    EMPTY_CHECK_DELAY = 5,
+    EMPTY_CHECK_DELAY = 0,
     EMPTY_COUNT_THRESHOLD = 3,
-    
-    -- WEBHOOK
+
     WEBHOOK_ENABLED = false,
     WEBHOOK_URL = "",
-    WEBHOOK_USERNAME = "Auto Mutation v4.6",
+    WEBHOOK_USERNAME = "Auto Mutation v4.9",
     WEBHOOK_SEND_COMPLETE = true,
 }
 
 --// ============================================================
--- LOAD MODULES
+-- MODULES
 --// ============================================================
 local playerDataModule = require(ReplicatedStorage.TS.state["player-data"])
 local petAgeUtils = require(ReplicatedStorage.TS.utils["pet-age.utils"])
+local calculatePetWeight = petAgeUtils.calculatePetWeight
+local formatPetWeight = petAgeUtils.formatPetWeight
 
 local getSharedTime, PET_MUTATION_TIME
 pcall(function()
@@ -70,7 +63,7 @@ pcall(function()
 end)
 
 --// ============================================================
--- GET REMOTES
+-- REMOTES
 --// ============================================================
 local function getRemo(name)
     local ok, remote = pcall(function()
@@ -93,7 +86,7 @@ local Remotes = {
 }
 
 --// ============================================================
--- UTILS
+-- HELPERS
 --// ============================================================
 local function getPlayerData()
     local ok, data = pcall(playerDataModule.getPlayerDataById, tostring(LocalPlayer.UserId))
@@ -107,31 +100,27 @@ end
 
 local function getPetWeight(petData)
     if not petData then return nil end
-    if petData.weight then return petData.weight end
-    if petData.w then return petData.w end
-    if petData.weightKg then return petData.weightKg end
-    if petData.stats then
-        if petData.stats.weight then return petData.stats.weight end
-        if petData.stats.w then return petData.stats.w end
+    if calculatePetWeight then
+        local ok, w = pcall(calculatePetWeight, petData)
+        if ok and w ~= nil then return w end
     end
-    return nil
+    return petData.weight or petData.w or petData.weightKg
 end
 
 local function formatWeight(w)
     if w == nil then return "?" end
+    if formatPetWeight then
+        local ok, f = pcall(formatPetWeight, w)
+        if ok and f ~= nil then return tostring(f) end
+    end
     if type(w) == "number" then return string.format("%.2f", w) end
     return tostring(w)
 end
 
---// ============================================================
--- MUTATION HELPERS
---// ============================================================
 local function getMutationTierIndex(mutName)
     if not mutName or mutName == "" then return 1 end
     for i, tier in ipairs(CONFIG.MUTATION_TIERS) do
-        if string.lower(tier) == string.lower(tostring(mutName)) then
-            return i
-        end
+        if string.lower(tier) == string.lower(tostring(mutName)) then return i end
     end
     return 1
 end
@@ -144,10 +133,7 @@ local function getHighestMutation(petData)
         local highest, highestIdx = nil, 0
         for _, m in ipairs(mut) do
             local idx = getMutationTierIndex(m)
-            if idx > highestIdx then
-                highestIdx = idx
-                highest = m
-            end
+            if idx > highestIdx then highestIdx = idx; highest = m end
         end
         return highest
     end
@@ -198,8 +184,7 @@ local function isBelowMinMutation(petData)
     local highest = getHighestMutation(petData)
     local petTier = getMutationTierIndex(highest)
     local minTier = getMutationTierIndex(CONFIG.MIN_MUTATION)
-    if petTier >= minTier and petTier > 1 then return true end
-    return false
+    return petTier >= minTier and petTier > 1
 end
 
 local function formatTime(seconds)
@@ -235,39 +220,33 @@ local function getPetDataById(petId)
 end
 
 --// ============================================================
--- HTTP HELPER
+-- HTTP
 --// ============================================================
 local function httpPost(url, body)
     local reqFunc = (request) or (http_request) or (http and http.request)
-
     if reqFunc then
         local ok, res = pcall(function()
             return reqFunc({
-                Url = url,
-                Method = "POST",
+                Url = url, Method = "POST",
                 Headers = { ["Content-Type"] = "application/json" },
                 Body = body,
             })
         end)
         if ok and res then
             local code = res.StatusCode or res.Status or 0
-            if code >= 200 and code < 300 then
-                return true, "request OK (" .. code .. ")"
-            end
+            if code >= 200 and code < 300 then return true, "OK " .. code end
             return false, "HTTP " .. tostring(code)
         end
     end
-
     local ok, err = pcall(function()
         HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
     if ok then return true, "PostAsync OK" end
-
-    return false, "HTTP gagal — " .. tostring(err)
+    return false, tostring(err)
 end
 
 --// ============================================================
--- WEBHOOK: MUTASI (nama + berat)
+-- WEBHOOK: MUTASI
 --// ============================================================
 local function sendMutationWebhook(petName, petWeight, mutationResult)
     if not CONFIG.WEBHOOK_ENABLED or CONFIG.WEBHOOK_URL == "" then return end
@@ -284,7 +263,6 @@ local function sendMutationWebhook(petName, petWeight, mutationResult)
     end
 
     local weightText = formatWeight(petWeight)
-
     local payload = {
         username = CONFIG.WEBHOOK_USERNAME,
         content = string.format("**%s** — %s", mut, weightText),
@@ -292,23 +270,26 @@ local function sendMutationWebhook(petName, petWeight, mutationResult)
             title = "🧬 " .. mut,
             color = color,
             description = string.format("**%s** — %s", tostring(petName), weightText),
-            footer = { text = "Auto Mutation v4.6 • " .. os.date("%H:%M:%S") },
+            footer = { text = "Auto Mutation v4.9 • " .. os.date("%H:%M:%S") },
         }},
     }
 
-    local body = HttpService:JSONEncode(payload)
     task.spawn(function()
-        local ok, err = httpPost(CONFIG.WEBHOOK_URL, body)
-        if not ok then warn("[Webhook] ❌", tostring(err)) end
+        httpPost(CONFIG.WEBHOOK_URL, HttpService:JSONEncode(payload))
     end)
 end
 
 --// ============================================================
--- WEBHOOK: COMPLETION + SUMMARY
+-- WEBHOOK: COMPLETION
 --// ============================================================
+local completionSent = false
+local sessionMutationCount = {}
+local sessionPetCount = 0
+
 local function sendCompletionWebhook(totalAll, totalProcessed, totalSkipped)
     if not CONFIG.WEBHOOK_ENABLED or not CONFIG.WEBHOOK_SEND_COMPLETE then return end
-    if CONFIG.WEBHOOK_URL == "" then return end
+    if CONFIG.WEBHOOK_URL == "" or completionSent then return end
+    completionSent = true
 
     local mutationLines = {}
     local totalMutated = 0
@@ -357,19 +338,18 @@ local function sendCompletionWebhook(totalAll, totalProcessed, totalSkipped)
                 { name = "🏆 Total Bermutasi",    value = tostring(totalMutated) .. " pet", inline = true },
                 { name = "📈 Total Pet Diproses", value = tostring(sessionPetCount) .. " pet", inline = true },
             },
-            footer = { text = "Auto Mutation v4.6 • " .. os.date("%Y-%m-%d %H:%M:%S") },
+            footer = { text = "Auto Mutation v4.9 • " .. os.date("%Y-%m-%d %H:%M:%S") },
         }},
     }
 
-    local body = HttpService:JSONEncode(payload)
     task.spawn(function()
-        local ok, err = httpPost(CONFIG.WEBHOOK_URL, body)
-        if ok then print("[Webhook] ✅ Completion terkirim") 
-        else warn("[Webhook Complete] ❌", tostring(err)) end
+        httpPost(CONFIG.WEBHOOK_URL, HttpService:JSONEncode(payload))
     end)
 end
 
--- ⭐ Inventory stats
+--// ============================================================
+-- INVENTORY STATS
+--// ============================================================
 local function getInventoryStats()
     if not inventoryStateModule then return 0, 0, 0 end
     local ok, stacked = pcall(function() return inventoryStateModule.inventoryStackedData() end)
@@ -419,7 +399,7 @@ local function safeFire(remote, ...)
 end
 
 local function safeInvoke(remote, ...)
-    if not remote then return false, "remote nil" end
+    if not remote then return false, "nil" end
     local args = {...}
     return pcall(function() return remote:InvokeServer(table.unpack(args)) end)
 end
@@ -442,8 +422,8 @@ local function getMachineState()
     end
 
     local elapsed = now - pm.timeStarted
-    local depletionRate = pm.depletionRate or 1
-    local totalTime = (PET_MUTATION_TIME or 300) / depletionRate
+    local rate = pm.depletionRate or 1
+    local totalTime = (PET_MUTATION_TIME or 300) / rate
     local remaining = math.max(0, totalTime - elapsed)
     local progress = math.clamp(elapsed / totalTime, 0, 1)
 
@@ -452,7 +432,7 @@ local function getMachineState()
 end
 
 --// ============================================================
--- SCAN ELIGIBLE
+-- SCAN
 --// ============================================================
 local function findEligiblePets()
     if not inventoryStateModule then return {} end
@@ -483,9 +463,7 @@ local function findEligiblePets()
 
                 if isMaxAge and not isSkip and not isEquipped then
                     table.insert(eligible, {
-                        id = petId,
-                        data = petData,
-                        age = age,
+                        id = petId, data = petData, age = age,
                         displayName = item.displayName or item.itemName or "?",
                     })
                 end
@@ -498,24 +476,11 @@ local function findEligiblePets()
 end
 
 --// ============================================================
--- SESSION TRACKER
---// ============================================================
-local sessionMutationCount = {}
-local sessionPetCount = 0
-
---// ============================================================
--- FEED FUNCTION
+-- FEED
 --// ============================================================
 local function feedPetToMachine(petEntry)
     local petId = petEntry.id
     local petName = petEntry.displayName
-
-    print(string.format("[FEED] %s | Age: %d", petName, petEntry.age))
-
-    if CONFIG.DRY_RUN then
-        print("  [DRY RUN]")
-        return true
-    end
 
     -- tunggu idle
     local waitIdle = 0
@@ -535,13 +500,9 @@ local function feedPetToMachine(petEntry)
     task.wait(CONFIG.DELAY_EQUIP)
 
     local ok, result = safeInvoke(Remotes.startMut, petId)
-    if not ok or result == false or result == nil then
-        print("  ❌ Insert gagal")
-        return false
-    end
+    if not ok or result == false or result == nil then return false end
     task.wait(CONFIG.DELAY_INSERT)
 
-    -- tunggu mutasi
     local waitStart = tick()
     while tick() - waitStart < CONFIG.MUTATION_TIMEOUT do
         if not CONFIG.AUTO_FEED then return false end
@@ -573,38 +534,17 @@ local function feedPetToMachine(petEntry)
         end
         realMutation = realMutation or "None"
 
-        -- catat tracker
         sessionMutationCount[realMutation] = (sessionMutationCount[realMutation] or 0) + 1
         sessionPetCount = sessionPetCount + 1
 
         sendMutationWebhook(petName, petWeight, realMutation)
-
-        if realMutation == "Diamond" then
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = "💎 Diamond Mutation!",
-                    Text = petName .. " dapat Diamond!",
-                    Duration = 5,
-                })
-            end)
-        elseif realMutation == "Gold" then
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = "🥇 Gold Mutation!",
-                    Text = petName .. " dapat Gold",
-                    Duration = 5,
-                })
-            end)
-        end
-        print("  ✅ Mutation:", realMutation)
     end
 
     if cok and cresult ~= false and cresult ~= nil then
         processCollect(cresult)
         return true
     else
-        -- retry 3x
-        for i = 1, 3 do
+        for _ = 1, 3 do
             task.wait(3)
             local rok, rresult = safeInvoke(Remotes.collectMut)
             if rok and rresult ~= false and rresult ~= nil then
@@ -612,7 +552,6 @@ local function feedPetToMachine(petEntry)
                 return true
             end
         end
-        print("  ❌ Collect gagal 3x")
         return false
     end
 end
@@ -623,42 +562,44 @@ end
 local isRunning = false
 local emptyCount = 0
 local totalProcessedSession = 0
+local hasProcessedAny = false
 
 local function autoFeedLoop()
     if isRunning then return end
     isRunning = true
     emptyCount = 0
     totalProcessedSession = 0
+    hasProcessedAny = false
+    completionSent = false
 
     while CONFIG.AUTO_FEED do
         local eligible = findEligiblePets()
         local totalAll, _, totalSkipped = getInventoryStats()
 
         if #eligible == 0 then
-            emptyCount = emptyCount + 1
-            print(string.format("⏸ Kosong #%d/%d", emptyCount, CONFIG.EMPTY_COUNT_THRESHOLD))
+            if hasProcessedAny then
+                emptyCount = emptyCount + 1
 
-            if CONFIG.AUTO_STOP_IF_EMPTY and emptyCount >= CONFIG.EMPTY_COUNT_THRESHOLD then
-                sendCompletionWebhook(totalAll, totalProcessedSession, totalSkipped)
+                if CONFIG.AUTO_STOP_IF_EMPTY and emptyCount >= CONFIG.EMPTY_COUNT_THRESHOLD then
+                    sendCompletionWebhook(totalAll, totalProcessedSession, totalSkipped)
 
-                if log then
-                    log("🛑 AUTO STOP: Semua pet selesai")
+                    pcall(function()
+                        game:GetService("StarterGui"):SetCore("SendNotification", {
+                            Title = "🛑 Auto Mutation STOP",
+                            Text = "Semua pet sudah diproses!",
+                            Duration = 5,
+                        })
+                    end)
+
+                    _G.__autoMutStop()
+                    break
                 end
-
-                pcall(function()
-                    game:GetService("StarterGui"):SetCore("SendNotification", {
-                        Title = "🛑 Auto Mutation STOP",
-                        Text = "Semua pet sudah diproses!",
-                        Duration = 5,
-                    })
-                end)
-
-                _G.__autoMutStop()
-                break
             end
             task.wait(CONFIG.EMPTY_CHECK_DELAY)
         else
             emptyCount = 0
+            hasProcessedAny = true
+
             local fed = 0
             for _, petEntry in ipairs(eligible) do
                 if fed >= CONFIG.MAX_FEED_PER_CYCLE or not CONFIG.AUTO_FEED then break end
@@ -676,10 +617,10 @@ local function autoFeedLoop()
 end
 
 --// ============================================================
--- GUI (COMPACT + MINIMIZE) — WEBHOOK 1 BARIS
+-- GUI
 --// ============================================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoMutationSimple"
+ScreenGui.Name = "AutoMutation"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -702,7 +643,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 26)
 Title.BackgroundColor3 = Color3.fromRGB(55, 40, 85)
 Title.BorderSizePixel = 0
-Title.Text = "🧬 AUTO MUTATION v4.6"
+Title.Text = "🧬 AUTO MUTATION v4.9"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 11
 Title.Font = Enum.Font.GothamBold
@@ -821,34 +762,15 @@ local InfoLabel = Instance.new("TextLabel")
 InfoLabel.Size = UDim2.new(1, -12, 0, 14)
 InfoLabel.Position = UDim2.new(0, 6, 0, 34)
 InfoLabel.BackgroundTransparency = 1
-InfoLabel.Text = string.format("Age %d | Min %s | Skip %s",
-    CONFIG.TARGET_AGE, CONFIG.MIN_MUTATION, table.concat(CONFIG.SKIP_MUTATIONS, ","))
+InfoLabel.Text = string.format("Age %d | Min %s | Stop %dx",
+    CONFIG.TARGET_AGE, CONFIG.MIN_MUTATION, CONFIG.EMPTY_COUNT_THRESHOLD)
 InfoLabel.TextColor3 = Color3.fromRGB(160, 160, 200)
 InfoLabel.TextSize = 9
 InfoLabel.Font = Enum.Font.Code
 InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
 InfoLabel.Parent = MachineFrame
 
--- LOG
-local LogLabel = Instance.new("TextLabel")
-LogLabel.Size = UDim2.new(1, -12, 0, 42)
-LogLabel.Position = UDim2.new(0, 6, 0, 96)
-LogLabel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-LogLabel.BorderSizePixel = 0
-LogLabel.Text = "[Log...]"
-LogLabel.TextColor3 = Color3.fromRGB(180, 200, 180)
-LogLabel.TextSize = 8
-LogLabel.Font = Enum.Font.Code
-LogLabel.TextXAlignment = Enum.TextXAlignment.Left
-LogLabel.TextYAlignment = Enum.TextYAlignment.Top
-LogLabel.TextWrapped = true
-LogLabel.Parent = Body
-Instance.new("UICorner", LogLabel).CornerRadius = UDim.new(0, 5)
-local LogPadding = Instance.new("UIPadding", LogLabel)
-LogPadding.PaddingTop = UDim.new(0, 3)
-LogPadding.PaddingLeft = UDim.new(0, 5)
-
--- WEBHOOK (1 BARIS: toggle | textbox | test)
+-- WEBHOOK BAR
 local WebhookFrame = Instance.new("Frame")
 WebhookFrame.Size = UDim2.new(1, -12, 0, 34)
 WebhookFrame.Position = UDim2.new(0, 6, 0, 142)
@@ -861,7 +783,6 @@ local WebhookStroke = Instance.new("UIStroke", WebhookFrame)
 WebhookStroke.Color = Color3.fromRGB(140, 100, 220)
 WebhookStroke.Thickness = 1
 
--- Toggle webhook (kiri)
 local WebhookToggle = Instance.new("TextButton")
 WebhookToggle.Size = UDim2.new(0.22, -4, 1, -8)
 WebhookToggle.Position = UDim2.new(0, 4, 0, 4)
@@ -874,7 +795,6 @@ WebhookToggle.Font = Enum.Font.GothamBold
 WebhookToggle.Parent = WebhookFrame
 Instance.new("UICorner", WebhookToggle).CornerRadius = UDim.new(0, 4)
 
--- TextBox URL (tengah)
 local WebhookBox = Instance.new("TextBox")
 WebhookBox.Size = UDim2.new(0.48, -4, 1, -8)
 WebhookBox.Position = UDim2.new(0.22, 2, 0, 4)
@@ -895,7 +815,6 @@ local WebhookBoxPadding = Instance.new("UIPadding", WebhookBox)
 WebhookBoxPadding.PaddingLeft = UDim.new(0, 5)
 WebhookBoxPadding.PaddingRight = UDim.new(0, 5)
 
--- Test button (kanan)
 local WebhookTest = Instance.new("TextButton")
 WebhookTest.Size = UDim2.new(0.3, -4, 1, -8)
 WebhookTest.Position = UDim2.new(0.7, 2, 0, 4)
@@ -908,7 +827,7 @@ WebhookTest.Font = Enum.Font.GothamBold
 WebhookTest.Parent = WebhookFrame
 Instance.new("UICorner", WebhookTest).CornerRadius = UDim.new(0, 4)
 
--- START BUTTON
+-- START
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(1, -12, 0, 28)
 ToggleBtn.Position = UDim2.new(0, 6, 1, -34)
@@ -935,32 +854,17 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- LOG FUNCTION
-local function log(msg)
-    local time = os.date("%H:%M:%S")
-    local newText = LogLabel.Text .. "\n[" .. time .. "] " .. msg
-    local lines = {}
-    for line in newText:gmatch("[^\n]+") do table.insert(lines, line) end
-    while #lines > 4 do table.remove(lines, 1) end
-    LogLabel.Text = table.concat(lines, "\n")
-    print("[AutoMut] " .. msg)
-end
-
 -- GLOBAL STOP
 function _G.__autoMutStop()
     CONFIG.AUTO_FEED = false
     emptyCount = 0
-    if ToggleBtn then
-        ToggleBtn.Text = "▶ START"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
-    end
-    if StatusLabel then
-        StatusLabel.Text = "STOPPED (auto) | Eligible: 0"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 180, 100)
-    end
+    ToggleBtn.Text = "▶ START"
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
+    StatusLabel.Text = "STOPPED | Eligible: 0"
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 180, 100)
 end
 
--- TOGGLE HANDLER
+-- START / STOP
 ToggleBtn.MouseButton1Click:Connect(function()
     CONFIG.AUTO_FEED = not CONFIG.AUTO_FEED
 
@@ -969,12 +873,12 @@ ToggleBtn.MouseButton1Click:Connect(function()
         totalProcessedSession = 0
         sessionMutationCount = {}
         sessionPetCount = 0
+        completionSent = false
 
         ToggleBtn.Text = "⏹ STOP"
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         StatusLabel.Text = "RUNNING | Eligible: -"
         StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-        log("🚀 START")
         task.spawn(autoFeedLoop)
     else
         emptyCount = 0
@@ -982,7 +886,6 @@ ToggleBtn.MouseButton1Click:Connect(function()
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
         StatusLabel.Text = "OFF | Eligible: -"
         StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        log("⏹ STOP")
     end
 end)
 
@@ -992,18 +895,15 @@ WebhookToggle.MouseButton1Click:Connect(function()
     if CONFIG.WEBHOOK_ENABLED then
         if CONFIG.WEBHOOK_URL == "" then
             CONFIG.WEBHOOK_ENABLED = false
-            log("⚠️ Isi URL dulu!")
             return
         end
         WebhookToggle.Text = "🔔 ON"
         WebhookToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         WebhookStroke.Color = Color3.fromRGB(180, 140, 255)
-        log("🔔 Webhook ON")
     else
         WebhookToggle.Text = "🔔 OFF"
         WebhookToggle.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
         WebhookStroke.Color = Color3.fromRGB(140, 100, 220)
-        log("🔔 Webhook OFF")
     end
 end)
 
@@ -1012,18 +912,16 @@ WebhookBox.FocusLost:Connect(function()
     local url = WebhookBox.Text
     if url:match("^https://discord%.com/api/webhooks/") then
         CONFIG.WEBHOOK_URL = url
-        log("🔔 URL disimpan")
     else
         WebhookBox.Text = CONFIG.WEBHOOK_URL
-        log("⚠️ URL invalid")
     end
 end)
 
 -- WEBHOOK TEST
 WebhookTest.MouseButton1Click:Connect(function()
     local url = CONFIG.WEBHOOK_URL
-    if not url or url == "" then log("⚠️ URL kosong!"); return end
-    if not url:match("^https://discord%.com/api/webhooks/") then log("⚠️ URL invalid!"); return end
+    if not url or url == "" then return end
+    if not url:match("^https://discord%.com/api/webhooks/") then return end
 
     WebhookTest.Text = "..."
     WebhookTest.BackgroundColor3 = Color3.fromRGB(180, 140, 60)
@@ -1038,22 +936,14 @@ WebhookTest.MouseButton1Click:Connect(function()
                 { name = "Player", value = LocalPlayer.Name, inline = true },
                 { name = "Time", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false },
             },
-            footer = { text = "Auto Mutation v4.6 • Test" },
+            footer = { text = "Auto Mutation v4.9 • Test" },
         }},
     }
 
-    local body = HttpService:JSONEncode(payload)
     task.spawn(function()
-        local ok, err = httpPost(url, body)
-        if ok then
-            WebhookTest.Text = "✅ OK"
-            WebhookTest.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
-            log("✅ Test BERHASIL")
-        else
-            WebhookTest.Text = "❌ FAIL"
-            WebhookTest.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-            log("❌ Test GAGAL: " .. tostring(err))
-        end
+        local ok = httpPost(url, HttpService:JSONEncode(payload))
+        WebhookTest.Text = ok and "✅ OK" or "❌ FAIL"
+        WebhookTest.BackgroundColor3 = ok and Color3.fromRGB(60, 180, 60) or Color3.fromRGB(200, 50, 50)
         task.wait(3)
         if WebhookTest and WebhookTest.Parent then
             WebhookTest.Text = "TEST"
@@ -1116,6 +1006,4 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
--- PRINT
-log("✅ GUI loaded (v4.6.2)")
-print("[AutoMut] ✅ Loaded v4.6.2 Lite! RightShift toggle GUI.")
+print("[AutoMut] ✅ v4.9 loaded")
