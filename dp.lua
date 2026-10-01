@@ -1,5 +1,5 @@
 -- ============================================================
--- AUTO SCAN + FEED MUTATION MACHINE (v4.6.1 LITE - NO BOOSTER)
+-- AUTO SCAN + FEED MUTATION MACHINE (v4.6.2 LITE - NO BOOSTER)
 -- + Minimum Mutation Filter (default: Diamond)
 -- + Skip Diamond & Gold (existing mutation)
 -- + Auto Deteksi Waktu Mesin
@@ -7,7 +7,7 @@
 -- + Discord Webhook (mutasi + berat + completion summary)
 -- + HTTP Multi-Fallback
 -- + GUI Compact + Tombol Minimize
--- + FIX: TextBox webhook tidak ketutup tombol START
+-- + FIX: Webhook TextBox di tengah (1 baris)
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -676,17 +676,16 @@ local function autoFeedLoop()
 end
 
 --// ============================================================
--- GUI (COMPACT + MINIMIZE) — FIXED LAYOUT
+-- GUI (COMPACT + MINIMIZE) — WEBHOOK 1 BARIS
 --// ============================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoMutationSimple"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- ⭐ Frame lebih tinggi (270) supaya TextBox webhook tidak ketutup tombol START
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 280, 0, 270)
-Frame.Position = UDim2.new(0, 20, 0.5, -135)
+Frame.Size = UDim2.new(0, 280, 0, 240)
+Frame.Position = UDim2.new(0, 20, 0.5, -120)
 Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 Frame.BorderSizePixel = 0
 Frame.Active = true
@@ -849,9 +848,9 @@ local LogPadding = Instance.new("UIPadding", LogLabel)
 LogPadding.PaddingTop = UDim.new(0, 3)
 LogPadding.PaddingLeft = UDim.new(0, 5)
 
--- WEBHOOK (naik dikit ke 138 biar ada gap ke tombol START)
+-- WEBHOOK (1 BARIS: toggle | textbox | test)
 local WebhookFrame = Instance.new("Frame")
-WebhookFrame.Size = UDim2.new(1, -12, 0, 66)
+WebhookFrame.Size = UDim2.new(1, -12, 0, 34)
 WebhookFrame.Position = UDim2.new(0, 6, 0, 142)
 WebhookFrame.BackgroundColor3 = Color3.fromRGB(30, 25, 45)
 WebhookFrame.BorderSizePixel = 0
@@ -862,8 +861,9 @@ local WebhookStroke = Instance.new("UIStroke", WebhookFrame)
 WebhookStroke.Color = Color3.fromRGB(140, 100, 220)
 WebhookStroke.Thickness = 1
 
+-- Toggle webhook (kiri)
 local WebhookToggle = Instance.new("TextButton")
-WebhookToggle.Size = UDim2.new(0.3, -4, 0, 20)
+WebhookToggle.Size = UDim2.new(0.22, -4, 1, -8)
 WebhookToggle.Position = UDim2.new(0, 4, 0, 4)
 WebhookToggle.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
 WebhookToggle.BorderSizePixel = 0
@@ -874,25 +874,14 @@ WebhookToggle.Font = Enum.Font.GothamBold
 WebhookToggle.Parent = WebhookFrame
 Instance.new("UICorner", WebhookToggle).CornerRadius = UDim.new(0, 4)
 
-local WebhookTest = Instance.new("TextButton")
-WebhookTest.Size = UDim2.new(0.3, -4, 0, 20)
-WebhookTest.Position = UDim2.new(0.7, 0, 0, 4)
-WebhookTest.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
-WebhookTest.BorderSizePixel = 0
-WebhookTest.Text = "TEST"
-WebhookTest.TextColor3 = Color3.fromRGB(255, 255, 255)
-WebhookTest.TextSize = 9
-WebhookTest.Font = Enum.Font.GothamBold
-WebhookTest.Parent = WebhookFrame
-Instance.new("UICorner", WebhookTest).CornerRadius = UDim.new(0, 4)
-
+-- TextBox URL (tengah)
 local WebhookBox = Instance.new("TextBox")
-WebhookBox.Size = UDim2.new(1, -8, 0, 22)
-WebhookBox.Position = UDim2.new(0, 4, 0, 30)
+WebhookBox.Size = UDim2.new(0.48, -4, 1, -8)
+WebhookBox.Position = UDim2.new(0.22, 2, 0, 4)
 WebhookBox.BackgroundColor3 = Color3.fromRGB(40, 35, 55)
 WebhookBox.BorderSizePixel = 0
 WebhookBox.Text = CONFIG.WEBHOOK_URL
-WebhookBox.PlaceholderText = "https://discord.com/api/webhooks/..."
+WebhookBox.PlaceholderText = "webhook URL..."
 WebhookBox.TextColor3 = Color3.fromRGB(220, 210, 255)
 WebhookBox.PlaceholderColor3 = Color3.fromRGB(120, 110, 150)
 WebhookBox.TextSize = 9
@@ -903,10 +892,23 @@ WebhookBox.TextTruncate = Enum.TextTruncate.AtEnd
 WebhookBox.Parent = WebhookFrame
 Instance.new("UICorner", WebhookBox).CornerRadius = UDim.new(0, 4)
 local WebhookBoxPadding = Instance.new("UIPadding", WebhookBox)
-WebhookBoxPadding.PaddingLeft = UDim.new(0, 6)
-WebhookBoxPadding.PaddingRight = UDim.new(0, 6)
+WebhookBoxPadding.PaddingLeft = UDim.new(0, 5)
+WebhookBoxPadding.PaddingRight = UDim.new(0, 5)
 
--- START BUTTON (di bawah, tidak nutup webhook box)
+-- Test button (kanan)
+local WebhookTest = Instance.new("TextButton")
+WebhookTest.Size = UDim2.new(0.3, -4, 1, -8)
+WebhookTest.Position = UDim2.new(0.7, 2, 0, 4)
+WebhookTest.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
+WebhookTest.BorderSizePixel = 0
+WebhookTest.Text = "TEST"
+WebhookTest.TextColor3 = Color3.fromRGB(255, 255, 255)
+WebhookTest.TextSize = 9
+WebhookTest.Font = Enum.Font.GothamBold
+WebhookTest.Parent = WebhookFrame
+Instance.new("UICorner", WebhookTest).CornerRadius = UDim.new(0, 4)
+
+-- START BUTTON
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(1, -12, 0, 28)
 ToggleBtn.Position = UDim2.new(0, 6, 1, -34)
@@ -919,12 +921,12 @@ ToggleBtn.Font = Enum.Font.GothamBold
 ToggleBtn.Parent = Body
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
 
--- MINIMIZE HANDLER (update ke 270)
+-- MINIMIZE HANDLER
 local minimized = false
 MinBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     Body.Visible = not minimized
-    Frame.Size = minimized and UDim2.new(0, 280, 0, 26) or UDim2.new(0, 280, 0, 270)
+    Frame.Size = minimized and UDim2.new(0, 280, 0, 26) or UDim2.new(0, 280, 0, 240)
     MinBtn.Text = minimized and "▢" or "—"
 end)
 
@@ -1115,5 +1117,5 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- PRINT
-log("✅ GUI loaded (v4.6.1)")
-print("[AutoMut] ✅ Loaded v4.6.1 Lite! RightShift toggle GUI.")
+log("✅ GUI loaded (v4.6.2)")
+print("[AutoMut] ✅ Loaded v4.6.2 Lite! RightShift toggle GUI.")
