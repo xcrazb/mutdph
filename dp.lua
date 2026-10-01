@@ -20,7 +20,7 @@ local LocalPlayer = Players.LocalPlayer
 --// ============================================================
 local CONFIG = {
     AUTO_FEED = false,
-    SCAN_INTERVAL = 2,
+    SCAN_INTERVAL = 1,
     DRY_RUN = false,
     TARGET_AGE = 50,
     
@@ -31,15 +31,15 @@ local CONFIG = {
         "None", "Bronze", "Silver", "Gold", "Diamond", "Rainbow", "Celestial",
     },
     
-    DELAY_EQUIP = 0.8,
+    DELAY_EQUIP = 0.5,
     DELAY_INSERT = 1,
-    DELAY_COLLECT = 3,
+    DELAY_COLLECT = 2,
     MAX_FEED_PER_CYCLE = 1,
     POLL_INTERVAL = 2,
     MUTATION_TIMEOUT = 600,
     
     AUTO_STOP_IF_EMPTY = true,
-    EMPTY_CHECK_DELAY = 5,
+    EMPTY_CHECK_DELAY = 0,
     EMPTY_COUNT_THRESHOLD = 3,
     
     -- WEBHOOK
