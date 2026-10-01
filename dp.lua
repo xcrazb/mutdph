@@ -1,5 +1,5 @@
 -- ============================================================
--- AUTO SCAN + FEED MUTATION MACHINE (v4.6 LITE - NO BOOSTER)
+-- AUTO SCAN + FEED MUTATION MACHINE (v4.6.1 LITE - NO BOOSTER)
 -- + Minimum Mutation Filter (default: Diamond)
 -- + Skip Diamond & Gold (existing mutation)
 -- + Auto Deteksi Waktu Mesin
@@ -7,6 +7,7 @@
 -- + Discord Webhook (mutasi + berat + completion summary)
 -- + HTTP Multi-Fallback
 -- + GUI Compact + Tombol Minimize
+-- + FIX: TextBox webhook tidak ketutup tombol START
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -20,7 +21,7 @@ local LocalPlayer = Players.LocalPlayer
 --// ============================================================
 local CONFIG = {
     AUTO_FEED = false,
-    SCAN_INTERVAL = 1,
+    SCAN_INTERVAL = 2,
     DRY_RUN = false,
     TARGET_AGE = 50,
     
@@ -31,15 +32,15 @@ local CONFIG = {
         "None", "Bronze", "Silver", "Gold", "Diamond", "Rainbow", "Celestial",
     },
     
-    DELAY_EQUIP = 0.5,
+    DELAY_EQUIP = 0.8,
     DELAY_INSERT = 1,
-    DELAY_COLLECT = 2,
+    DELAY_COLLECT = 3,
     MAX_FEED_PER_CYCLE = 1,
     POLL_INTERVAL = 2,
     MUTATION_TIMEOUT = 600,
     
     AUTO_STOP_IF_EMPTY = true,
-    EMPTY_CHECK_DELAY = 0,
+    EMPTY_CHECK_DELAY = 5,
     EMPTY_COUNT_THRESHOLD = 3,
     
     -- WEBHOOK
@@ -675,16 +676,17 @@ local function autoFeedLoop()
 end
 
 --// ============================================================
--- GUI (COMPACT + MINIMIZE)
+-- GUI (COMPACT + MINIMIZE) — FIXED LAYOUT
 --// ============================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoMutationSimple"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
+-- ⭐ Frame lebih tinggi (270) supaya TextBox webhook tidak ketutup tombol START
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 280, 0, 240)
-Frame.Position = UDim2.new(0, 20, 0.5, -120)
+Frame.Size = UDim2.new(0, 280, 0, 270)
+Frame.Position = UDim2.new(0, 20, 0.5, -135)
 Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 Frame.BorderSizePixel = 0
 Frame.Active = true
@@ -847,7 +849,7 @@ local LogPadding = Instance.new("UIPadding", LogLabel)
 LogPadding.PaddingTop = UDim.new(0, 3)
 LogPadding.PaddingLeft = UDim.new(0, 5)
 
--- WEBHOOK
+-- WEBHOOK (naik dikit ke 138 biar ada gap ke tombol START)
 local WebhookFrame = Instance.new("Frame")
 WebhookFrame.Size = UDim2.new(1, -12, 0, 66)
 WebhookFrame.Position = UDim2.new(0, 6, 0, 142)
@@ -904,7 +906,7 @@ local WebhookBoxPadding = Instance.new("UIPadding", WebhookBox)
 WebhookBoxPadding.PaddingLeft = UDim.new(0, 6)
 WebhookBoxPadding.PaddingRight = UDim.new(0, 6)
 
--- START BUTTON
+-- START BUTTON (di bawah, tidak nutup webhook box)
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(1, -12, 0, 28)
 ToggleBtn.Position = UDim2.new(0, 6, 1, -34)
@@ -917,12 +919,12 @@ ToggleBtn.Font = Enum.Font.GothamBold
 ToggleBtn.Parent = Body
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
 
--- MINIMIZE HANDLER
+-- MINIMIZE HANDLER (update ke 270)
 local minimized = false
 MinBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     Body.Visible = not minimized
-    Frame.Size = minimized and UDim2.new(0, 280, 0, 26) or UDim2.new(0, 280, 0, 240)
+    Frame.Size = minimized and UDim2.new(0, 280, 0, 26) or UDim2.new(0, 280, 0, 270)
     MinBtn.Text = minimized and "▢" or "—"
 end)
 
@@ -1113,5 +1115,5 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- PRINT
-log("✅ GUI loaded (v4.6 Lite)")
-print("[AutoMut] ✅ Loaded v4.6 Lite! RightShift toggle GUI.")
+log("✅ GUI loaded (v4.6.1)")
+print("[AutoMut] ✅ Loaded v4.6.1 Lite! RightShift toggle GUI.")
